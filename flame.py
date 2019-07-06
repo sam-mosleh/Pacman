@@ -28,7 +28,7 @@ def createTeam(firstIndex,
                secondIndex,
                isRed,
                first='ReinforcementAgent',
-               second='DummyAgent',
+               second='ReinforcementAgent',
                numTraining=0):
     """
     This function should return a list of two agents that will form the
@@ -44,11 +44,10 @@ def createTeam(firstIndex,
     any extra arguments, so you should make sure that the default
     behavior is what you want for the nightly contest.
     """
-
     # The following line is an example only; feel free to change it.
     return [
         eval(first)(firstIndex, numTraining=numTraining),
-        eval(second)(secondIndex)
+        eval(second)(secondIndex, numTraining=numTraining)
     ]
 
 
@@ -57,18 +56,13 @@ def createTeam(firstIndex,
 ##########
 
 
-class ReinforcementAgent(CaptureAgent):
+class ReinforcementAgentBase(CaptureAgent):
     """Documentation for ReinforcementAgent
-
+    It only need the update and getQValue to get overrided
     """
 
-    def __init__(self,
-                 index,
-                 timeForComputing=0.1,
-                 learning_rate=0.2,
-                 exploration_rate=0.05,
-                 discount=0.8,
-                 numTraining=0):
+    def __init__(self, index, timeForComputing, learning_rate,
+                 exploration_rate, discount, numTraining):
         CaptureAgent.__init__(self, index, timeForComputing)
         self.alpha = float(learning_rate)
         self.epsilon = float(exploration_rate)
@@ -76,8 +70,6 @@ class ReinforcementAgent(CaptureAgent):
         self.numTraining = int(numTraining)
         self.has_no_observation = True
         self.episodesSoFar = 0
-        # Q-VALUES
-        self.qValues = util.Counter()
 
     def isInTraining(self):
         return self.episodesSoFar < self.numTraining
@@ -107,7 +99,9 @@ class ReinforcementAgent(CaptureAgent):
         return self.last_action
 
     def actionSelector(self, gameState):
-        return random.choice(self.getLegalActions(gameState))
+        if util.flipCoin(self.epsilon):
+            return random.choice(self.getLegalActions(gameState))
+        return self.getPolicy(gameState)
 
     def registerInitialState(self, gameState):
         CaptureAgent.registerInitialState(self, gameState)
@@ -137,12 +131,13 @@ class ReinforcementAgent(CaptureAgent):
         #     self.accumTestRewards += self.episodeRewards
         # self.episodesSoFar += 1
         if self.episodesSoFar >= self.numTraining:
+            print 'TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT'
             # Take off the training wheels
             self.epsilon = 0.0    # no exploration
             self.alpha = 0.0    # no learning
 
     def getQValue(self, state, action):
-        return self.qValues[(state, action)]
+        pass
 
     def getPolicyValue(self, state):
         possibleActions = self.getLegalActions(state)
@@ -158,10 +153,43 @@ class ReinforcementAgent(CaptureAgent):
         return None, float('-inf')
 
     def getPolicy(self, state):
-        return self.getPolicyValue()[0]
+        return self.getPolicyValue(state)[0]
 
     def getValue(self, state):
-        return self.getPolicyValue()[1]
+        return self.getPolicyValue(state)[1]
+
+
+class ReinforcementAgent(ReinforcementAgentBase):
+    """Documentation for ReinforcementAgent
+
+    """
+
+    def __init__(self,
+                 index,
+                 timeForComputing=0.1,
+                 learning_rate=0.3,
+                 exploration_rate=0.25,
+                 discount=0.8,
+                 numTraining=0):
+        ReinforcementAgentBase.__init__(self, index, timeForComputing,
+                                        learning_rate, exploration_rate,
+                                        discount, numTraining)
+        self.qValues = util.Counter()
+        self.toShow = True
+
+    def getQValue(self, state, action):
+        if self.toShow:
+            print 'Q-VALUE'
+            self.toShow = False
+        return self.qValues[(state, action)]
+
+    def update(self, state, action, nextState, reward):
+        if self.toShow:
+            print 'UPDATE'
+            self.toShow = False
+        estimated_q = reward + self.gamma * self.getValue(nextState)
+        error = estimated_q - self.getQValue(state, action)
+        self.qValues[(state, action)] += self.alpha * error
 
 
 class DummyAgent(CaptureAgent):
