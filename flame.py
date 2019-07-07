@@ -19,6 +19,9 @@ import util
 from captureAgents import CaptureAgent
 from game import Directions
 
+from keras.models import Sequential
+from keras.layers.core import Dense, Dropout
+
 #################
 # Team creation #
 #################
@@ -175,21 +178,71 @@ class ReinforcementAgent(ReinforcementAgentBase):
                                         learning_rate, exploration_rate,
                                         discount, numTraining)
         self.qValues = util.Counter()
-        self.toShow = True
 
     def getQValue(self, state, action):
-        if self.toShow:
-            print 'Q-VALUE'
-            self.toShow = False
         return self.qValues[(state, action)]
 
     def update(self, state, action, nextState, reward):
-        if self.toShow:
-            print 'UPDATE'
-            self.toShow = False
         estimated_q = reward + self.gamma * self.getValue(nextState)
         error = estimated_q - self.getQValue(state, action)
         self.qValues[(state, action)] += self.alpha * error
+
+
+class DeepReinforcementAgent(ReinforcementAgentBase):
+    """Documentation for DeepReinforcementAgent
+
+    """
+
+    def __init__(self,
+                 index,
+                 timeForComputing=0.1,
+                 learning_rate=0.3,
+                 exploration_rate=0.25,
+                 discount=0.8,
+                 numTraining=0):
+        ReinforcementAgentBase.__init__(self, index, timeForComputing,
+                                        learning_rate, exploration_rate,
+                                        discount, numTraining)
+        self.q_estimator = None
+
+    def getQValue(self, state, action):
+        if self.q_estimator is None:
+            self.q_estimator = NeuralNetwork(state)
+        prediction = self.q_estimator.predict(state, action)
+        return prediction
+
+    def update(self, state, action, nextState, reward):
+        if self.q_estimator is None:
+            self.q_estimator = NeuralNetwork(state)
+        estimated_q = reward + self.gamma * self.getValue(nextState)
+        self.q_estimator.update(state, action, estimated_q)
+
+
+class NeuralNetwork:
+    """Documentation for NeuralNetwork
+
+    """
+
+    def __init__(self, state, firstLayerSize=200):
+        walls = state.getWalls()
+        self.width = walls.width
+        self.height = walls.height
+        self.area = self.width * self.height
+
+        self.model = Sequential()
+        self.model.add(
+            Dense(units=200,
+                  activation='relu',
+                  input_dim=6 * self.size,
+                  init='lecun_uniform'))
+        self.model.add(Dense(units=1, activation='linear'))
+
+    def predict(self, state, action):
+        input = self.makeInputFrom(state, action)
+        return 1
+
+    def makeInputFrom(self, state, action):
+        pass
 
 
 class DummyAgent(CaptureAgent):
