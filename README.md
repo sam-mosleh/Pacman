@@ -1,6 +1,6 @@
 # Project Title
 
-One Paragraph of project description goes here
+We've just made an agent to play Pacman Capture
 
 ## Getting Started
 

@@ -88,13 +88,16 @@ class ReinforcementAgentBase(CaptureAgent):
     def makeUpdate(self):
         delta_reward = self.getScore(self.getCurrentObservation()) - \
                        self.getScore(self.getPreviousObservation())
+        if self.getCurrentObservation().getAgentState(self.index).isPacman:
+            delta_reward += 1
         self.update(self.getPreviousObservation(), self.actionHistory[-2],
                     self.getCurrentObservation(), delta_reward)
         # episode rewards?
 
     def observationFunction(self, state):
         if not self.has_no_observation and \
-           self.getPreviousObservation() is not None:
+           self.getPreviousObservation() is not None and \
+           self.isInTraining():
             self.makeUpdate()
         return CaptureAgent.observationFunction(self, state)
 
@@ -116,9 +119,9 @@ class ReinforcementAgentBase(CaptureAgent):
         # starting episode?
 
     def final(self, gameState):
-        self.makeUpdate()
         self.stopEpisode()
         if self.isInTraining():
+            self.makeUpdate()
             print 'Training:{'
         else:
             print 'Testing:{'
@@ -198,7 +201,7 @@ class DeepReinforcementAgent(ReinforcementAgentBase):
                  index,
                  timeForComputing=0.1,
                  learning_rate=0.3,
-                 exploration_rate=0.3,
+                 exploration_rate=0.01,
                  discount=0.8,
                  numTraining=0,
                  createNewModel=False):
@@ -214,7 +217,7 @@ class DeepReinforcementAgent(ReinforcementAgentBase):
             if self.createNewModel:
                 nn = NeuralNetwork(gameState)
             else:
-                nn = NeuralNetwork(gameState, modelPath='myModel.h5')
+                nn = NeuralNetwork(gameState, modelPath='twoLayerModel.h5')
         self.q_estimator = nn
         ReinforcementAgentBase.registerInitialState(self, gameState)
 
@@ -234,7 +237,7 @@ class DeepReinforcementAgent(ReinforcementAgentBase):
         self.q_estimator.update(self, state, action, estimated_q)
 
     def final(self, gameState):
-        self.q_estimator.save('myModel.h5')
+        self.q_estimator.save('twoLayerModel.h5')
         ReinforcementAgentBase.final(self, gameState)
 
 
@@ -243,17 +246,26 @@ class NeuralNetwork:
 
     """
 
-    def __init__(self, state, firstLayerSize=300, modelPath=None):
-        walls = state.getWalls()
-        self.width = walls.width
-        self.height = walls.height
+    def __init__(self,
+                 state,
+                 firstLayerSize=600,
+                 secondLayerSize=300,
+                 modelPath=None):
+        self.walls = state.getWalls()
+        self.width = self.walls.width
+        self.height = self.walls.height
         self.area = self.width * self.height
         if modelPath is None:
             self.model = Sequential()
             self.model.add(
                 Dense(units=firstLayerSize,
                       activation='relu',
-                      input_dim=6 * self.area,
+                      input_dim=12 * self.area,
+                      init='random_uniform'))
+            self.model.add(Dropout(0.2))
+            self.model.add(
+                Dense(units=secondLayerSize,
+                      activation='relu',
                       init='random_uniform'))
             self.model.add(Dense(units=1, activation='linear'))
             self.model.compile(optimizer='adam', loss='mean_squared_error')
@@ -271,23 +283,32 @@ class NeuralNetwork:
 
     def encodeState(self, agent, state, action):
         # Get all the foods on the ground
-        allFoods = np.zeros((self.width, self.height))
+        mapWalls = np.zeros((self.width, self.height))
+        for x, y in self.walls.asList():
+            mapWalls[x, y] = 1
+        allMyFoods = np.zeros((self.width, self.height))
         for x, y in agent.getFood(state).asList():
-            allFoods[x, y] = 1
+            allMyFoods[x, y] = 1
+        allEnemyFoods = np.zeros((self.width, self.height))
         for x, y in agent.getFoodYouAreDefending(state).asList():
-            allFoods[x, y] = 1
+            allEnemyFoods[x, y] = 1
         # get all the capsules
-        allCapsuls = np.zeros((self.width, self.height))
+        allMyCapsuls = np.zeros((self.width, self.height))
         for x, y in agent.getCapsules(state):
-            allCapsuls[x, y] = 1
+            allMyCapsuls[x, y] = 1
+        allEnemyCapsuls = np.zeros((self.width, self.height))
         for x, y in agent.getCapsulesYouAreDefending(state):
-            allCapsuls[x, y] = 1
+            allEnemyCapsuls[x, y] = 1
         # get all the enemies if you can :D
-        allEnemies = np.zeros((self.width, self.height))
+        allPacmanEnemies = np.zeros((self.width, self.height))
+        allGhostEnemies = np.zeros((self.width, self.height))
         for enemyIndex in agent.getOpponents(state):
             enemyPos = state.getAgentPosition(enemyIndex)
             if enemyPos is not None:
-                allEnemies[enemyPos] = 1
+                if state.getAgentState(enemyIndex).isPacman:
+                    allPacmanEnemies[enemyPos[0], enemyPos[1]] = 1
+                else:
+                    allGhostEnemies[enemyPos[0], enemyPos[1]] = 1
         # get teammate position and set
         teamMate = np.zeros((self.width, self.height))
         agent_1, agent_2 = agent.getTeam(state)
@@ -295,19 +316,31 @@ class NeuralNetwork:
             teamMatePosition = state.getAgentPosition(agent_2)
         else:
             teamMatePosition = state.getAgentPosition(agent_1)
-        teamMate[teamMatePosition] = 1
+        teamMate[teamMatePosition[0], teamMatePosition[1]] = 1
         # set the Agent position
-        agentPosition = np.zeros((self.width, self.height))
+        agentGhostPosition = np.zeros((self.width, self.height))
+        agentPacmanPosition = np.zeros((self.width, self.height))
         myPos = state.getAgentPosition(agent.index)
-        agentPosition[myPos[0], myPos[1]] = 1
+        imPacman = state.getAgentState(agent.index).isPacman
+        if imPacman:
+            agentPacmanPosition[myPos[0], myPos[1]] = 1
+        else:
+            agentGhostPosition[myPos[0], myPos[1]] = 1
         # set the next position
-        agentNextPosition = np.zeros((self.width, self.height))
+        agentPacmanNextPosition = np.zeros((self.width, self.height))
+        agentGhostNextPosition = np.zeros((self.width, self.height))
         successor = state.generateSuccessor(agent.index, action)
         nextPos = successor.getAgentPosition(agent.index)
-        agentNextPosition[int(nextPos[0]), int(nextPos[1])] = 1
-        result = np.concatenate((allFoods, allCapsuls, allEnemies, teamMate,
-                                 agentPosition, agentNextPosition)).reshape(
-                                     (1, -1))
+        nextImPacman = successor.getAgentState(agent.index).isPacman
+        if nextImPacman:
+            agentPacmanNextPosition[int(nextPos[0]), int(nextPos[1])] = 1
+        else:
+            agentGhostNextPosition[int(nextPos[0]), int(nextPos[1])] = 1
+        result = np.concatenate(
+            (mapWalls, allMyFoods, allEnemyFoods, allMyCapsuls,
+             allEnemyCapsuls, allPacmanEnemies, allGhostEnemies, teamMate,
+             agentPacmanPosition, agentGhostPosition, agentPacmanNextPosition,
+             agentGhostNextPosition)).reshape((1, -1))
         return result
 
     def save(self, pathname):
